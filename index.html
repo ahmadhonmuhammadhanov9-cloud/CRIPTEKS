@@ -3249,9 +3249,27 @@
         bg.querySelector('#m-cancel').addEventListener('click', () => bg.remove());
         bg.querySelector('#m-save').addEventListener('click', async () => {
           const out = Object.assign({}, data);
-          fields.forEach(f => {out[f.k] = bg.querySelector(`[data-f="${f.k}"]`).value;});
-          if (id) await updateEntry(id, out); else await addEntry(module, out);
-          bg.remove(); updateBadges(); render(); toast('✅ Saqlandi', 'ok', 1200);
+          ['title', 'price', 'currency', 'deadline', 'priority', 'notes'].forEach(k => out[k] = bg.querySelector(`[data-f="${k}"]`).value);
+          out.done = bg.querySelector('#goal-done').checked;
+          if (photoBlob) {
+            const newId = id || uuid();
+            try {
+              await blobSet(newId, photoBlob);
+              out.hasBlob = true;
+            } catch (err) {
+              console.error('Goal photo save xato:', err);
+              toast('Rasm saqlanmadi: ' + err.message, 'err');
+            }
+            if (id) await updateEntry(id, out);
+            else {
+              const rec = await aesEncryptJSON(vaultKey, out, 'goals:' + newId);
+              entriesCache.push({id: newId, module: 'goals', rec, createdAt: Date.now(), updatedAt: Date.now()});
+              await Store.set('entries', entriesCache);
+            }
+          } else {
+            if (id) await updateEntry(id, out); else await addEntry('goals', out);
+          }
+          bg.remove(); updateBadges(); render(); toast('✅', 'ok', 1200);
         });
       }
 
@@ -3932,12 +3950,20 @@
           inp.addEventListener('change', async () => {
             const f = inp.files[0]; if (!f) return;
             const id = uuid();
-            await blobSet(id, f);
-            if (FS.handle) {try {await FS.writeFile('files', 'file-' + Date.now() + '-' + f.name, f);} catch (e) { } }
-            const rec = await aesEncryptJSON(vaultKey, {title: f.name, mime: f.type, size: f.size, hasBlob: true}, 'files:' + id);
-            entriesCache.push({id, module: 'files', rec, createdAt: Date.now(), updatedAt: Date.now()});
-            await Store.set('entries', entriesCache);
-            updateBadges(); render(); toast('📎', 'ok');
+            try {
+              await blobSet(id, f);
+              if (FS.handle) {
+                try {await FS.writeFile('files', 'file-' + Date.now() + '-' + f.name, f);}
+                catch (fsErr) {console.warn('FS write xato:', fsErr);}
+              }
+              const rec = await aesEncryptJSON(vaultKey, {title: f.name, mime: f.type, size: f.size, hasBlob: true}, 'files:' + id);
+              entriesCache.push({id, module: 'files', rec, createdAt: Date.now(), updatedAt: Date.now()});
+              await Store.set('entries', entriesCache);
+              updateBadges(); render(); toast('📎 Saqlandi', 'ok');
+            } catch (err) {
+              console.error('File save xato:', err);
+              toast('Xato: ' + err.message, 'err', 4000);
+            }
           });
           inp.click();
         });
@@ -4063,17 +4089,27 @@
           const files = Array.from(e.target.files || []);
           if (!files.length) return;
           toast(files.length + ' yuklanmoqda...', 'ok', 2000);
+          let successCount = 0, failCount = 0;
           for (const f of files) {
             const id = uuid();
             try {
               await blobSet(id, f);
-              if (FS.handle) {try {await FS.writeFile('audios', 'audio-' + Date.now() + '-' + f.name, f);} catch (er) { } }
+              if (FS.handle) {
+                try {await FS.writeFile('audios', 'audio-' + Date.now() + '-' + f.name, f);}
+                catch (fsErr) {console.warn('FS write xato:', fsErr);}
+              }
               const rec = await aesEncryptJSON(vaultKey, {title: f.name, mime: f.type, size: f.size, hasBlob: true}, 'audios:' + id);
               entriesCache.push({id, module: 'audios', rec, createdAt: Date.now(), updatedAt: Date.now()});
-            } catch (er) {console.error(er); toast('Xato: ' + er.message, 'err', 4000);}
+              successCount++;
+            } catch (err) {
+              console.error('Audio save xato:', err);
+              failCount++;
+            }
           }
           await Store.set('entries', entriesCache);
-          toast('✅ ' + files.length, 'ok'); updateBadges(); render();
+          if (failCount === 0) toast('✅ ' + successCount + ' ta saqlandi', 'ok');
+          else toast('⚠ ' + successCount + ' OK, ' + failCount + ' xato', 'warn', 4000);
+          updateBadges(); render();
         });
         $('#rec-btn').addEventListener('click', async () => {
           const st = $('#rec-status');
@@ -4094,12 +4130,18 @@
               const id = uuid();
               try {
                 await blobSet(id, blob);
-                if (FS.handle) {try {await FS.writeFile('audios', 'rec-' + Date.now() + '.' + ext, blob);} catch (er) { } }
+                if (FS.handle) {
+                  try {await FS.writeFile('audios', 'rec-' + Date.now() + '.' + ext, blob);}
+                  catch (fsErr) {console.warn('FS write xato:', fsErr);}
+                }
                 const rec = await aesEncryptJSON(vaultKey, {title: 'Yozuv ' + new Date().toLocaleTimeString() + '.' + ext, mime: blob.type, size: blob.size, hasBlob: true}, 'audios:' + id);
                 entriesCache.push({id, module: 'audios', rec, createdAt: Date.now(), updatedAt: Date.now()});
                 await Store.set('entries', entriesCache);
                 toast('🎙 Saqlandi', 'ok');
-              } catch (er) {console.error(er); toast('Xato', 'err');}
+              } catch (err) {
+                console.error('Rec save xato:', err);
+                toast('Xato: ' + err.message, 'err', 4000);
+              }
               st.textContent = ''; $('#rec-btn').textContent = '● Yozish';
               updateBadges(); render();
             };
